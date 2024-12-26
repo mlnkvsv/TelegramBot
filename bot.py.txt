@@ -1,0 +1,71 @@
+from aiogram import Bot, Dispatcher, types, executor
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+import requests
+
+API_TOKEN = '8183613143:AAGzBc-yIfU0e-k_2DvlSL10sgR3Euo5Qqc'
+GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwU3BQ7QJYP0HEf9DQrhjJxmzlqGxcDDSflUm1Gp0TxLvMZu0WJQumf8QMgKDKTHf28/exec'
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+
+questions = [
+    {"text": "Привет, {name}! Расскажи, чем ты занимаешься:",
+     "options": ["Дизайнер карточек", "Дизайнер другого направления", "Менеджер маркетплейсов", "Другое"]},
+    {"text": "Какой твой доход на дизайне карточек сейчас?",
+     "options": ["0р", "5000-20.000р", "20.000-40.000р", "40.000-60.000р", "60.000-80.000р", "80.000-100.000р", "100.000-150.000р", "150.000р+"]},
+    {"text": "На какой доход хочешь выйти в ближайшие 1-3 месяца?",
+     "options": ["50.000-80.000р", "80.000-100.000р", "100.000-150.000р", "150.000-200.000р", "200.000-300.000р"]},
+    {"text": "Готов ли ты обучаться и платить за обучение?",
+     "options": ["Да", "Нет", "Смотря, что за обучение"]}
+]
+
+answers = {}
+
+@dp.message_handler(commands=['start'])
+async def start_handler(message: types.Message):
+    name = message.from_user.first_name
+    answers[message.from_user.id] = {"name": name, "answers": []}
+    await ask_question(message, 0)
+
+async def ask_question(message, question_index):
+    if question_index < len(questions):
+        question = questions[question_index]
+        markup = ReplyKeyboardMarkup(resize_keyboard=True)
+        for option in question["options"]:
+            markup.add(option)
+        await message.reply(question["text"].format(name=answers[message.from_user.id]["name"]), reply_markup=markup)
+    else:
+        markup = ReplyKeyboardMarkup(resize_keyboard=True).add(
+            KeyboardButton("Поделиться контактом", request_contact=True)
+        )
+        await message.reply("Оставь свой контакт:", reply_markup=markup)
+
+@dp.message_handler(lambda message: message.from_user.id in answers)
+async def collect_answers(message: types.Message):
+    user_data = answers[message.from_user.id]
+    user_data["answers"].append(message.text)
+
+    if len(user_data["answers"]) < len(questions):
+        await ask_question(message, len(user_data["answers"]))
+    else:
+        await ask_question(message, len(questions))
+
+@dp.message_handler(content_types=types.ContentType.CONTACT)
+async def handle_contact(message: types.Message):
+    user_data = answers.pop(message.from_user.id, None)
+    if user_data:
+        user_data["contact"] = message.contact.phone_number
+        requests.post(GOOGLE_SCRIPT_URL, json={
+            "name": user_data["name"],
+            "answer1": user_data["answers"][0],
+            "answer2": user_data["answers"][1],
+            "answer3": user_data["answers"][2],
+            "answer4": user_data["answers"][3],
+            "contact": user_data["contact"]
+        })
+        await message.reply("Спасибо! Мы получили вашу заявку и скоро свяжемся с вами.")
+    else:
+        await message.reply("Произошла ошибка. Попробуйте снова.")
+
+if __name__ == '__main__':
+    executor.start_polling(dp)
